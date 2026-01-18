@@ -6,7 +6,6 @@ cd "$(dirname "$0")"
 # Define paths
 SOURCE_FILE="../src/main.py"
 OUTPUT_DIR="../bin"
-CONFIG_FILE="nuitka-config.yaml"
 
 # Version/Metadata Information
 COMPANY_NAME="Mixtura Project"
@@ -29,7 +28,6 @@ python3 -m nuitka \
     --file-description="$FILE_DESCRIPTION" \
     --copyright="$COPYRIGHT_TEXT" \
     --output-dir="$OUTPUT_DIR" \
-    --user-package-configuration-file="$CONFIG_FILE" \
     --output-filename="mixtura" \
     --remove-output \
     --show-progress \

@@ -3,7 +3,7 @@ import sys
 import hashlib
 import os
 import subprocess
-import urllib.request
+
 
 from utils import Style
 from commands import cmd_add, cmd_remove, cmd_upgrade, cmd_list, cmd_search
@@ -27,10 +27,11 @@ def check_for_updates():
     if not getattr(sys, 'frozen', False):
         return
 
-    github_hash_url = "https://raw.githubusercontent.com/miguel-b-p/mixtura/master/bin/HASH"
+    github_hash_url = "https://raw.githubusercontent.com/miguel-b-p/mixtura/refs/heads/master/bin/HASH"
     try:
         # 1. Calculate local hash using system command
-        executable_path = sys.executable
+        executable_path = os.path.join(os.path.dirname(sys.argv[0])) + "/mixtura"
+
         # Use sha256sum command
         result = subprocess.run(
             ["sha256sum", executable_path], 
@@ -42,8 +43,13 @@ def check_for_updates():
         local_hash = result.stdout.split()[0]
 
         # 2. Fetch remote hash
-        with urllib.request.urlopen(github_hash_url, timeout=5) as response:
-            remote_hash = response.read().decode('utf-8').strip()
+        result = subprocess.run(
+            ["curl", "-A", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "-sL", github_hash_url],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        remote_hash = result.stdout.strip()
 
         # 3. Compare
         if local_hash.lower() != remote_hash.lower():
