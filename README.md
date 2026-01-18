@@ -16,7 +16,7 @@ The objective of Mixtura is not to replace these tools but to provide a cohesive
 
 ## Why Mixtura?
 
-The name "Mixtura" comes from the combination of the English word **"Mix"** and the Portuguese word **"Mistura"**.
+The name "Mixtura" comes from the combination of the English word **"Mix"**, and the Portuguese word **"Mistura"**.
 
 It reflects the project's core philosophy: it **mixes** and unifies disparate package managers (like Nix and Flatpak) into a single, cohesive experience. It's about blending different technologies into one seamless workflow.
 
