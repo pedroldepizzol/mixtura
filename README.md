@@ -1,10 +1,12 @@
 # Mixtura
 
-<p align="center">
+<div align="center">
+<p>
   <img src="assets/logo.png" width="300" alt="Mixtura Logo">
-</p>
 
-Mixed together. Running everywhere.
+  <h2>Mixed together. Running everywhere.</h2>
+</p>
+</div>
 
 ## Overview
 
