@@ -35,7 +35,7 @@ def check_for_updates():
     try:
         # 1. Calculate local hash using system command
         executable_path = os.path.join(os.path.dirname(sys.argv[0])) + "/mixtura"
-        print("executable path:", executable_path)
+        # print("executable path:", executable_path)
 
         # Use hashlib
         sha256_hash = hashlib.sha256()
@@ -56,8 +56,8 @@ def check_for_updates():
             content = data.get("content", "")
             remote_hash = base64.b64decode(content).decode().strip()
 
-        print("local hash:", local_hash)
-        print("remote hash:", remote_hash)
+        # print("local hash:", local_hash)
+        # print("remote hash:", remote_hash)
 
         # 3. Compare
         if local_hash.lower() != remote_hash.lower():
