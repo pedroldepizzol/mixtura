@@ -26,62 +26,63 @@ def cmd_add(args: argparse.Namespace) -> None:
     for arg in args.packages:
         if '#' in arg:
             # Explicit provider
-            provider, pkg = arg.split('#', 1)
+            provider, pkgs_str = arg.split('#', 1)
+            # Handle comma separated values
+            items = [p.strip() for p in pkgs_str.split(',') if p.strip()]
+            
             if provider not in packages_to_install:
                 packages_to_install[provider] = []
-            packages_to_install[provider].append(pkg)
+            packages_to_install[provider].extend(items)
         else:
             # Ambiguous package - Search Mode
-            log_task(f"Searching for '{Style.BOLD}{arg}{Style.RESET}' across all providers...")
-            results = manager.search_all(arg)
+            # Handle commas here too: add git,vim -> [git, vim]
+            items = [p.strip() for p in arg.split(',') if p.strip()]
             
-            if not results:
-                log_warn(f"No packages found for '{arg}'.")
-                continue
-            
-            # Interactive Selection
-            print(f"\n{Style.BOLD}Found {len(results)} matches for '{arg}':{Style.RESET}")
-            
-            # Pagination/Limit could be good but let's list all for now (capped by provider implementation usually)
-            for i, res in enumerate(results):
-                idx = i + 1
-                name = res.get('name', 'unknown')
-                prov = res.get('provider', 'unknown')
-                ver = res.get('version', '')
-                desc = res.get('description', '')[:60] # truncate desc
-                if len(res.get('description', '')) > 60: desc += "..."
+            for item in items:
+                log_task(f"Searching for '{Style.BOLD}{item}{Style.RESET}' across all providers...")
+                results = manager.search_all(item)
                 
-                print(f" {Style.SUCCESS}{idx}.{Style.RESET} {Style.BOLD}{name}{Style.RESET} {Style.DIM}({prov} {ver}){Style.RESET}")
-                if desc:
-                    print(f"    {desc}")
-            
-            print()
-            try:
-                choice = input(f"{Style.INFO}Select a package to add (1-{len(results)}) or 's' to skip: {Style.RESET}")
-                if choice.lower() == 's' or choice.lower() == 'q':
-                    print("Skipping...")
+                if not results:
+                    log_warn(f"No packages found for '{item}'.")
                     continue
                 
-                choice_idx = int(choice) - 1
-                if 0 <= choice_idx < len(results):
-                    selected = results[choice_idx]
-                    prov = selected['provider']
+                # Interactive Selection
+                print(f"\n{Style.BOLD}Found {len(results)} matches for '{item}':{Style.RESET}")
+                
+                for i, res in enumerate(results):
+                    idx = i + 1
+                    name = res.get('name', 'unknown')
+                    prov = res.get('provider', 'unknown')
+                    ver = res.get('version', '')
+                    desc = res.get('description', '')[:60]
+                    if len(res.get('description', '')) > 60: desc += "..."
                     
-                    # We need the ID for installation
-                    # Nix: we used attribute path as ID
-                    # Flatpak: ID is app ID
-                    # Homebrew: ID is name
-                    pkg_id = selected.get('id') or selected.get('name')
+                    print(f" {Style.SUCCESS}{idx}.{Style.RESET} {Style.BOLD}{name}{Style.RESET} {Style.DIM}({prov} {ver}){Style.RESET}")
+                    if desc:
+                        print(f"    {desc}")
+                
+                print()
+                try:
+                    choice = input(f"{Style.INFO}Select a package to add (1-{len(results)}) or 's' to skip: {Style.RESET}")
+                    if choice.lower() == 's' or choice.lower() == 'q':
+                        print("Skipping...")
+                        continue
                     
-                    if prov not in packages_to_install:
-                        packages_to_install[prov] = []
-                    
-                    packages_to_install[prov].append(pkg_id)
-                    log_info(f"Selected {selected['name']} from {prov}")
-                else:
-                    log_error("Invalid selection.")
-            except ValueError:
-                log_error("Invalid input.")
+                    choice_idx = int(choice) - 1
+                    if 0 <= choice_idx < len(results):
+                        selected = results[choice_idx]
+                        prov = selected['provider']
+                        pkg_id = selected.get('id') or selected.get('name')
+                        
+                        if prov not in packages_to_install:
+                            packages_to_install[prov] = []
+                        
+                        packages_to_install[prov].append(pkg_id)
+                        log_info(f"Selected {selected['name']} from {prov}")
+                    else:
+                        log_error("Invalid selection.")
+                except ValueError:
+                    log_error("Invalid input.")
 
     # Proceed with installation
     if not packages_to_install:
@@ -104,13 +105,121 @@ def cmd_add(args: argparse.Namespace) -> None:
 
 def cmd_remove(args: argparse.Namespace) -> None:
     manager = ModuleManager.get_instance()
-    grouped_packages = manager.resolve_packages(args.packages)
+    
+    packages_to_remove: Dict[str, List[str]] = {}
 
-    if not grouped_packages:
-        log_warn("No packages specified.")
+    for arg in args.packages:
+        if '#' in arg:
+            # Explicit provider
+            provider, pkgs_str = arg.split('#', 1)
+            # Handle comma separated values
+            items = [p.strip() for p in pkgs_str.split(',') if p.strip()]
+            
+            if provider not in packages_to_remove:
+                packages_to_remove[provider] = []
+            packages_to_remove[provider].extend(items)
+        else:
+            # Ambiguous package - Search Installed Mode
+            # Handle commas here too
+            items = [p.strip() for p in arg.split(',') if p.strip()]
+            
+            for item in items:
+                log_task(f"Searching for installed package '{Style.BOLD}{item}{Style.RESET}'...")
+                
+                matches = []
+                for mgr in manager.get_all_managers():
+                    if not mgr.is_available():
+                        continue
+                    
+                    try:
+                        installed = mgr.list_packages() # Assuming this is reasonably fast
+                        for pkg in installed:
+                            # Fuzzy matching or exact? 
+                            # User said "similar names", so substring match is good.
+                            # But we should prioritize exact match if possible?
+                            p_name = pkg.get('name', '')
+                            if item.lower() in p_name.lower():
+                                pkg['provider'] = mgr.name
+                                matches.append(pkg)
+                    except Exception as e:
+                        log_warn(f"Failed to list packages from {mgr.name}: {e}")
+
+                if not matches:
+                    log_warn(f"No installed packages found matching '{item}'.")
+                    continue
+                
+                # Filter out packages that are already selected for removal
+                # from previous arguments or searches in this same command
+                filtered_matches = []
+                for m in matches:
+                    prov = m['provider']
+                    pid = m.get('id') or m.get('name')
+                    # Check if already in our scheduled list
+                    if pid not in packages_to_remove.get(prov, []):
+                        filtered_matches.append(m)
+                
+                if not filtered_matches:
+                    # If we found matches but they are all already selected, just skip
+                    if len(matches) > 0:
+                        log_info(f"Matches for '{item}' are already selected for removal. Skipping prompt.")
+                    continue
+                
+                matches = filtered_matches
+
+                print(f"\n{Style.BOLD}Found {len(matches)} installed matches for '{item}':{Style.RESET}")
+                
+                for i, res in enumerate(matches):
+                    idx = i + 1
+                    name = res.get('name', 'unknown')
+                    prov = res.get('provider', 'unknown')
+                    ver = res.get('version', '')
+                    # Some list_packages implementation might not give desc, that's fine.
+                    
+                    print(f" {Style.SUCCESS}{idx}.{Style.RESET} {Style.BOLD}{name}{Style.RESET} {Style.DIM}({prov} {ver}){Style.RESET}")
+                
+                print()
+                try:
+                    choice = input(f"{Style.INFO}Select a package to remove (1-{len(matches)}), 'a' to remove all, or 's' to skip: {Style.RESET}")
+                    if choice.lower() == 's' or choice.lower() == 'q':
+                        print("Skipping...")
+                        continue
+                    
+                    if choice.lower() == 'a':
+                        confirm = input(f"{Style.WARNING}Are you sure you want to remove ALL {len(matches)} packages listed above? (y/N): {Style.RESET}")
+                        if confirm.lower() == 'y':
+                            for selected in matches:
+                                prov = selected['provider']
+                                pkg_id = selected.get('id') or selected.get('name')
+                                if prov not in packages_to_remove:
+                                    packages_to_remove[prov] = []
+                                packages_to_remove[prov].append(pkg_id)
+                                log_info(f"Selected {selected['name']} from {prov} for removal")
+                            continue
+                        else:
+                             print("Cancelled 'remove all'. Skipping...")
+                             continue
+
+                    choice_idx = int(choice) - 1
+                    if 0 <= choice_idx < len(matches):
+                        selected = matches[choice_idx]
+                        prov = selected['provider']
+                        
+                        pkg_id = selected.get('id') or selected.get('name')
+                        
+                        if prov not in packages_to_remove:
+                            packages_to_remove[prov] = []
+                        packages_to_remove[prov].append(pkg_id)
+                        log_info(f"Selected {selected['name']} from {prov} for removal")
+                    else:
+                        log_error("Invalid selection.")
+                except ValueError:
+                    log_error("Invalid input.")
+
+    if not packages_to_remove:
+        log_warn("No packages selected for removal.")
         return
 
-    for provider_name, packages in grouped_packages.items():
+    for provider_name, packages in packages_to_remove.items():
         mgr = _get_manager_or_warn(provider_name)
         if mgr:
              log_task(f"Removing {len(packages)} packages via {mgr.name}...")

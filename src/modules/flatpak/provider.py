@@ -26,8 +26,14 @@ class FlatpakProvider(PackageManager):
             log_error("Flatpak is not installed.")
             return
 
-        for query in packages:
-             self._install_interactive(query)
+        # Flatpak install can take multiple arguments
+        # If the input is an ID (e.g. com.spotify.Client), it works directly.
+        # If it is a name (e.g. spotify), flatpak might be interactive or find it.
+        # Since we might have resolved it via cmd_add interactive search, we assume best effort.
+        # We use -y to avoid flatpak's own confirmation (we are the wrapper).
+        
+        log_info(f"Installing: {', '.join(packages)} (flatpak)...")
+        run(["flatpak", "install", "-y"] + packages)
 
     def uninstall(self, packages: List[str]) -> None:
         if not self.is_available():

@@ -40,16 +40,22 @@ You can mix and match providers in a single command.
 
 ```bash
 # Install from the default provider (Nix)
-mixtura add nixpkgs#git
+mixtura add nixpkgs#git,vim
 
 # Install with interactive search (if provider not specified)
-mixtura add git
-# > Searches all providers and prompts for selection
+mixtura add git vim
+# > Searches all providers and prompts for selection per package
 
 # Install specifically from Flatpak
 mixtura add flatpak#Spotify
 # Or
 mix add flatpak#Spotify
+
+# Flexible Command: Mix Providers and Search
+# Installs 'bottles' from Nix, 'Sober' from Flatpak, and interactively searches for 'ollama'
+mixtura add nixpkgs#bottles flatpak#Sober ollama
+# Or
+mix add nixpkgs#bottles flatpak#Sober ollama
 
 # Install from multiple sources simultaneously
 mixtura add nixpkgs#vim flatpak#OBS
@@ -60,7 +66,12 @@ mix add nixpkgs#vim flatpak#OBS
 ### Removing Packages
 
 ```bash
-mixtura remove git flatpak#Spotify
+# Remove specific packages
+mixtura remove nixpkgs#git flatpak#Spotify
+
+# Remove with interactive search (if provider not specified)
+mixtura remove firefox
+# > Search installed packages matching 'firefox' across all providers and prompts for selection
 ```
 
 ### Upgrading
