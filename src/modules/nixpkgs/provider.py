@@ -187,8 +187,44 @@ class NixProvider(PackageManager):
         except Exception:
             return []
 
-    def search(self, query: str) -> None:
+    def search(self, query: str) -> List[Dict[str, Any]]:
         if not self.is_available():
-            return
+            return []
         log_info(f"Searching for '{Style.BOLD}{query}{Style.RESET}' in nixpkgs...")
-        run(["nix", "search", "nixpkgs", query])
+        
+        try:
+            # nix search nixpkgs <query> --json
+            # Note: Experimental feature, might need --extra-experimental-features 'nix-command flakes'
+            # But the existing code suggests 'nix profile' usage which implies 2.4+
+            cmd = ["nix", "search", "nixpkgs", query, "--json"]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                # Fallback or just return empty?
+                # Sometimes nix return non-zero if no matches?
+                return []
+            
+            data = json.loads(result.stdout)
+            packages = []
+            
+            # Structure: { "legacyPackages.x86_64-linux.pkgName": { "description": "...", "version": "..." } }
+            for key, details in data.items():
+                # key is usually something like "legacyPackages.x86_64-linux.git"
+                # we want the last part as name usually
+                name = key.split('.')[-1]
+                version = details.get('version', 'unknown')
+                desc = details.get('description', '')
+                
+                packages.append({
+                    "name": name,
+                    "id": key, # Provide full attribute path as ID
+                    "description": desc,
+                    "version": version,
+                    "provider": self.name
+                })
+            
+            return packages
+
+        except Exception as e:
+            log_warn(f"Nix search failed: {e}")
+            return []

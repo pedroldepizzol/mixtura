@@ -2,7 +2,7 @@ import os
 import importlib.util
 import sys
 import glob
-from typing import Dict, List, Type
+from typing import Dict, List, Type, Any
 from core import PackageManager
 from utils import log_warn, log_info
 
@@ -96,3 +96,20 @@ class ModuleManager:
                 grouped[default_manager_name].extend(items)
                 
         return grouped
+
+    def search_all(self, query: str) -> List[Dict[str, Any]]:
+        """
+        Search for query in all available package managers.
+        Returns a aggregated list of results.
+        """
+        all_results = []
+        for mgr in self.get_all_managers():
+            if mgr.is_available():
+                try:
+                    results = mgr.search(query)
+                    if results:
+                        all_results.extend(results)
+                except Exception as e:
+                    # Individual search failure shouldn't stop others
+                    log_warn(f"Search failed in {mgr.name}: {e}")
+        return all_results

@@ -45,9 +45,10 @@ class PackageManager(ABC):
         pass
 
     @abstractmethod
-    def search(self, query: str) -> None:
+    def search(self, query: str) -> List[Dict[str, Any]]:
         """
-        Search for packages matching the query and display results.
+        Search for packages matching the query and return results.
+        Returns a list of dicts, each containing at least 'name', 'version', 'description'.
         """
         pass
 

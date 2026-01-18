@@ -73,11 +73,56 @@ class FlatpakProvider(PackageManager):
         except Exception:
             return []
 
-    def search(self, query: str) -> None:
+    def search(self, query: str) -> List[Dict[str, Any]]:
         if not self.is_available():
-            return
+            return []
+        
         log_info(f"Searching for '{Style.BOLD}{query}{Style.RESET}' in flathub...")
-        run(["flatpak", "search", query])
+        
+        try:
+            # We use --columns to ensure consistent output format
+            result = subprocess.run(
+                ["flatpak", "search", query, "--columns=name,application,description,version"], 
+                capture_output=True, 
+                text=True
+            )
+            
+            if result.returncode != 0:
+                return []
+
+            lines = result.stdout.strip().split('\n')
+            packages = []
+            
+            # Skip header if present (flatpak usually prints header if tty, but maybe not with pipe, checking just in case)
+            if lines and "Application ID" in lines[0]:
+                lines = lines[1:]
+
+            for line in lines:
+                if not line.strip(): continue
+                parts = line.split('\t')
+                
+                # Fallback for splitting if tabs aren't reliable (rare with --columns but possible)
+                if len(parts) < 2:
+                    parts = line.split(maxsplit=3) # naive fallback
+
+                if len(parts) >= 2:
+                    name = parts[0]
+                    app_id = parts[1]
+                    desc = parts[2] if len(parts) > 2 else ""
+                    version = parts[3] if len(parts) > 3 else "unknown"
+                    
+                    packages.append({
+                        "name": name,
+                        "id": app_id,
+                        "description": desc,
+                        "version": version,
+                        "provider": self.name
+                    })
+            return packages
+
+        except Exception as e:
+            log_warn(f"Flatpak search failed: {e}")
+            return []
 
     def _install_interactive(self, term: str) -> None:
         log_task(f"Searching for '{Style.BOLD}{term}{Style.RESET}' in flathub...")

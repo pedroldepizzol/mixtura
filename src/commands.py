@@ -11,20 +11,94 @@ def _get_manager_or_warn(name: str):
 
 def cmd_add(args: argparse.Namespace) -> None:
     manager = ModuleManager.get_instance()
-    grouped_packages = manager.resolve_packages(args.packages)
     
-    if not grouped_packages:
-        log_warn("No packages specified.")
+    # We need to manually parse args to distinguish "naked" packages
+    # resolve_packages forces a default provider which we want to avoid if possible for 'add'
+    # Actually, resolve_packages logic: 
+    # if '#' not in arg: defaults to 'nixpkgs' (or whatever default)
+    
+    # New logic: iterate over args. 
+    # If arg has '#', use it.
+    # If not, search ALL providers.
+    
+    packages_to_install: Dict[str, List[str]] = {}
+    
+    for arg in args.packages:
+        if '#' in arg:
+            # Explicit provider
+            provider, pkg = arg.split('#', 1)
+            if provider not in packages_to_install:
+                packages_to_install[provider] = []
+            packages_to_install[provider].append(pkg)
+        else:
+            # Ambiguous package - Search Mode
+            log_task(f"Searching for '{Style.BOLD}{arg}{Style.RESET}' across all providers...")
+            results = manager.search_all(arg)
+            
+            if not results:
+                log_warn(f"No packages found for '{arg}'.")
+                continue
+            
+            # Interactive Selection
+            print(f"\n{Style.BOLD}Found {len(results)} matches for '{arg}':{Style.RESET}")
+            
+            # Pagination/Limit could be good but let's list all for now (capped by provider implementation usually)
+            for i, res in enumerate(results):
+                idx = i + 1
+                name = res.get('name', 'unknown')
+                prov = res.get('provider', 'unknown')
+                ver = res.get('version', '')
+                desc = res.get('description', '')[:60] # truncate desc
+                if len(res.get('description', '')) > 60: desc += "..."
+                
+                print(f" {Style.SUCCESS}{idx}.{Style.RESET} {Style.BOLD}{name}{Style.RESET} {Style.DIM}({prov} {ver}){Style.RESET}")
+                if desc:
+                    print(f"    {desc}")
+            
+            print()
+            try:
+                choice = input(f"{Style.INFO}Select a package to add (1-{len(results)}) or 's' to skip: {Style.RESET}")
+                if choice.lower() == 's' or choice.lower() == 'q':
+                    print("Skipping...")
+                    continue
+                
+                choice_idx = int(choice) - 1
+                if 0 <= choice_idx < len(results):
+                    selected = results[choice_idx]
+                    prov = selected['provider']
+                    
+                    # We need the ID for installation
+                    # Nix: we used attribute path as ID
+                    # Flatpak: ID is app ID
+                    # Homebrew: ID is name
+                    pkg_id = selected.get('id') or selected.get('name')
+                    
+                    if prov not in packages_to_install:
+                        packages_to_install[prov] = []
+                    
+                    packages_to_install[prov].append(pkg_id)
+                    log_info(f"Selected {selected['name']} from {prov}")
+                else:
+                    log_error("Invalid selection.")
+            except ValueError:
+                log_error("Invalid input.")
+
+    # Proceed with installation
+    if not packages_to_install:
+        log_warn("No packages selected for installation.")
         return
 
-    for provider_name, packages in grouped_packages.items():
+    print()
+    for provider_name, packages in packages_to_install.items():
         mgr = _get_manager_or_warn(provider_name)
-        if mgr:
-            if mgr.is_available():
-                log_task(f"Installing {len(packages)} packages via {mgr.name}...")
-                mgr.install(packages)
+        if mgr and mgr.is_available():
+            log_task(f"Installing {len(packages)} packages via {mgr.name}...")
+            mgr.install(packages)
+        else:
+            if mgr:
+                log_error(f"Provider '{mgr.name}' is not available.")
             else:
-                log_error(f"Provider '{mgr.name}' is not available on this system.")
+                 log_error(f"Provider '{provider_name}' unknown.")
 
     log_success("Installation process finished.")
 
@@ -59,53 +133,46 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
 
     # 2. Upgrade specific provider (e.g. 'nixpkgs')
     # Or specific packages
-    grouped = manager.resolve_packages(args.packages)
+    packages_map: Dict[str, List[str]] = {}
+    providers_full = []
     
-    # Special case: user might skip prefix and just say "nixpkgs" to mean "upgrade all in nixpkgs"
-    # But parse_package_args logic in resolving assumes it's a package named "nixpkgs" for default provider.
-    # We need to detect if arg matches a provider name directly.
+    # Reuse simple logic or custom parsing?
+    # Let's use simple manual parsing as resolve_packages forces default.
     
-    # A cleaner approach with the new system:
-    # If the arg matches a provider name exactly, upgrade that provider fully.
-    # Else, treat it as a package for default provider.
-    
-    pkgs_to_upgrade: Dict[str, List[str]] = {}
-    providers_to_fully_upgrade = []
-
     for arg in args.packages:
+        # Check if arg is a provider name
         if manager.get_manager(arg):
-            providers_to_fully_upgrade.append(arg)
-        elif '#' in arg:
-            # explicit provider
+            providers_full.append(arg)
+            continue
+            
+        if '#' in arg:
             prov, pkg = arg.split('#', 1)
-            if prov not in pkgs_to_upgrade: pkgs_to_upgrade[prov] = []
-            pkgs_to_upgrade[prov].append(pkg)
+            if prov not in packages_map: packages_map[prov] = []
+            packages_map[prov].append(pkg)
         else:
-            # check default or fallback
-            # In old logic: 'flatpak' was a keyword.
-            if arg == 'flatpak': providers_to_fully_upgrade.append('flatpak') # compat
-            elif arg == 'nixpkgs': providers_to_fully_upgrade.append('nixpkgs')
-            else:
-                 # Default logic (resolve via manager helper for default?)
-                 # For simplicity, let's assume default is nixpkgs if not specified
-                 if 'nixpkgs' not in pkgs_to_upgrade: pkgs_to_upgrade['nixpkgs'] = []
-                 pkgs_to_upgrade['nixpkgs'].append(arg)
+            # Default fallback for upgrade? 
+            # Assume 'nixpkgs' as default for upgrade context if not specified? 
+            # Or should we warn?
+            # Existing behavior was defaulting to nixpkgs.
+            prov = 'nixpkgs'
+            if prov not in packages_map: packages_map[prov] = []
+            packages_map[prov].append(arg)
 
     # Execute full upgrades
-    for prov in providers_to_fully_upgrade:
+    for prov in providers_full:
         mgr = _get_manager_or_warn(prov)
         if mgr and mgr.is_available():
             log_task(f"Upgrading all packages in {prov}...")
             mgr.upgrade(None)
 
     # Execute package specific upgrades
-    for prov, pkgs in pkgs_to_upgrade.items():
+    for prov, pkgs in packages_map.items():
         mgr = _get_manager_or_warn(prov)
         if mgr and mgr.is_available():
             log_task(f"Upgrading specific packages in {prov}...")
             mgr.upgrade(pkgs)
 
-    if not pkgs_to_upgrade and not providers_to_fully_upgrade:
+    if not packages_map and not providers_full:
         log_warn("No packages or providers specified for upgrade.")
     else:
         log_success("Upgrade process finished.")
@@ -154,12 +221,30 @@ def cmd_list(args: argparse.Namespace) -> None:
 
 def cmd_search(args: argparse.Namespace) -> None:
     manager = ModuleManager.get_instance()
-    grouped = manager.resolve_packages(args.query) # Reusing this logic for "provider#term"
-
-    for provider_name, queries in grouped.items():
-        mgr = _get_manager_or_warn(provider_name)
-        if mgr:
-             if not mgr.is_available():
-                 continue
-             for q in queries:
-                 mgr.search(q)
+    # If args.query is a list, we handle each.
+    # Note: argparse definition for 'search' usually takes 'query' as nargs='+'
+    
+    for q in args.query:
+        if '#' in q:
+             # Provider specific search
+             prov, term = q.split('#', 1)
+             mgr = _get_manager_or_warn(prov)
+             if mgr and mgr.is_available():
+                 results = mgr.search(term)
+                 if results:
+                     print(f"{Style.BOLD}Results for '{term}' in {prov}:{Style.RESET}")
+                     for res in results:
+                         print(f"  • {res.get('name')} ({res.get('version')}) - {res.get('description')}")
+                 else:
+                     log_warn(f"No results for '{term}' in {prov}")
+        else:
+             # Search all
+             log_task(f"Searching for '{q}'...")
+             results = manager.search_all(q)
+             if results:
+                 print(f"{Style.BOLD}Results for '{q}':{Style.RESET}")
+                 for res in results:
+                      prov = res.get('provider')
+                      print(f"  [{prov}] {res.get('name')} ({res.get('version')}) - {res.get('description')}")
+             else:
+                 log_warn(f"No results for '{q}'")
